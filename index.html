@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="description" content="CyberShield — India's intelligent cybercrime reporting and investigation management system. Report financial fraud, phishing, cyberbullying, hacking, and identity theft online."/>
+  <title>CyberShield — Intelligent Cybercrime Reporting System</title>
+
+  <!-- Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&display=swap" rel="stylesheet"/>
+
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+
+  <!-- ── AMBIENT GLOW ORBS ── -->
+  <div class="orb orb1" aria-hidden="true"></div>
+  <div class="orb orb2" aria-hidden="true"></div>
+  <div class="orb orb3" aria-hidden="true"></div>
+
+  <!-- ════════════════════════════════════════════════════════
+       SCREEN 1 — LOGIN / REGISTER
+       ════════════════════════════════════════════════════════ -->
+  <section id="loginScreen" class="screen active" aria-label="Authentication">
+    <div class="login-card">
+
+      <!-- Brand -->
+      <header class="logo-mark">
+        <div class="logo-icon" aria-hidden="true">🛡️</div>
+        <div class="logo-text">Cyber<span>Shield</span></div>
+      </header>
+
+      <!-- Tab switcher -->
+      <nav class="tabs" role="tablist" aria-label="Login or Register">
+        <div class="tab active" role="tab" aria-selected="true"  id="tab-login"    onclick="switchTab('login')">Sign In</div>
+        <div class="tab"        role="tab" aria-selected="false" id="tab-register" onclick="switchTab('register')">Create Account</div>
+      </nav>
+
+      <!-- ── LOGIN FORM ── -->
+      <div id="loginForm" role="tabpanel" aria-labelledby="tab-login">
+        <h1 class="login-title">Welcome back</h1>
+        <p class="login-sub">Sign in to access your cybercrime reporting dashboard</p>
+        <br/>
+        <div class="form-group">
+          <label for="loginUser">Username / Email</label>
+          <input type="text" id="loginUser" placeholder="Enter username or email" autocomplete="username"/>
+        </div>
+        <div class="form-group">
+          <label for="loginPass">Password</label>
+          <input type="password" id="loginPass" placeholder="Enter password" autocomplete="current-password"
+                 onkeydown="if(event.key==='Enter') doLogin()"/>
+        </div>
+        <div id="loginError" class="error-msg" role="alert"></div>
+        <br/>
+        <button id="loginBtn" class="btn btn-primary" onclick="doLogin()">Sign In →</button>
+      </div>
+
+      <!-- ── REGISTER FORM ── -->
+      <div id="registerForm" role="tabpanel" aria-labelledby="tab-register" style="display:none">
+        <h1 class="login-title">Create account</h1>
+        <p class="login-sub">Register as a citizen to submit cybercrime reports</p>
+        <br/>
+        <div class="row-2">
+          <div class="form-group">
+            <label for="regName">Full Name</label>
+            <input type="text" id="regName" placeholder="John Doe" autocomplete="name"/>
+          </div>
+          <div class="form-group">
+            <label for="regUsername">Username</label>
+            <input type="text" id="regUsername" placeholder="johndoe" autocomplete="username"/>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="regEmail">Email Address</label>
+          <input type="email" id="regEmail" placeholder="john@example.com" autocomplete="email"/>
+        </div>
+        <div class="row-2">
+          <div class="form-group">
+            <label for="regPhone">Contact Number</label>
+            <input type="tel" id="regPhone" placeholder="+91 9876543210" autocomplete="tel"/>
+          </div>
+          <div class="form-group">
+            <label for="regCity">City</label>
+            <input type="text" id="regCity" placeholder="Mumbai"/>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="regAddress">Full Address</label>
+          <input type="text" id="regAddress" placeholder="Flat No, Street, City, State" autocomplete="street-address"/>
+        </div>
+        <div class="row-2">
+          <div class="form-group">
+            <label for="regPass">Password</label>
+            <input type="password" id="regPass" placeholder="Min 6 characters" autocomplete="new-password"/>
+          </div>
+          <div class="form-group">
+            <label for="regPass2">Confirm Password</label>
+            <input type="password" id="regPass2" placeholder="Repeat password" autocomplete="new-password"/>
+          </div>
+        </div>
+        <div id="regError"   class="error-msg"   role="alert"></div>
+        <div id="regSuccess" class="success-msg" role="status"></div>
+        <br/>
+        <button id="registerBtn" class="btn btn-primary" onclick="doRegister()">Create Account →</button>
+      </div>
+
+    </div><!-- /.login-card -->
+  </section><!-- /#loginScreen -->
+
+  <!-- ════════════════════════════════════════════════════════
+       SCREEN 2 — MAIN APPLICATION
+       ════════════════════════════════════════════════════════ -->
+  <div id="appScreen" class="screen">
+
+    <!-- ── SIDEBAR ── -->
+    <aside class="sidebar" aria-label="Application Navigation">
+      <header class="sidebar-logo">
+        <div class="logo-icon" aria-hidden="true">🛡️</div>
+        <div class="logo-text">Cyber<span>Shield</span></div>
+      </header>
+
+      <span id="roleBadge" class="role-badge role-user">Citizen</span>
+
+      <nav aria-label="Main Navigation">
+        <div class="nav-section">Navigation</div>
+        <div id="navItems"></div>
+      </nav>
+
+      <footer class="sidebar-footer">
+        <div class="user-info">
+          <div class="avatar" id="avatarText" aria-hidden="true">U</div>
+          <div>
+            <div class="user-name"  id="sidebarName">User</div>
+            <div class="user-email" id="sidebarEmail">user@email.com</div>
+          </div>
+        </div>
+        <button class="btn-logout" onclick="doLogout()">⏻ Sign Out</button>
+      </footer>
+    </aside>
+
+    <!-- ── MAIN CONTENT ── -->
+    <main class="main-content" id="mainContent" aria-live="polite"></main>
+
+  </div><!-- /#appScreen -->
+
+  <!-- ════════════════════════════════════════════════════════
+       MODAL OVERLAY
+       ════════════════════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modalOverlay" role="dialog" aria-modal="true" aria-label="Case Details">
+    <div class="modal" id="modalContent"></div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════
+       NOTIFICATION TOAST
+       ════════════════════════════════════════════════════════ -->
+  <div class="notif hidden" id="notif" role="status" aria-live="polite">
+    <span id="notifIcon"></span>
+    <span id="notifMsg"></span>
+  </div>
+
+  <!-- Application JS -->
+  <script src="app.js"></script>
+</body>
+</html>
