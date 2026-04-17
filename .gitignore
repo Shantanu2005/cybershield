@@ -9,6 +9,3 @@ npm-debug.log*
 # OS files
 .DS_Store
 Thumbs.db
-
-# NOTE: .env is intentionally NOT listed here
-# so it gets committed and is visible on GitHub
