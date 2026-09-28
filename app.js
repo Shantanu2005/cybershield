@@ -21,13 +21,16 @@
 const API_BASE = 'http://localhost:3000/api';
 
 const API = {
-  /* ── internal fetch helper ── */
+  /* ── internal fetch helper (attaches JWT) ── */
   async _req(method, path, body = null) {
     try {
       const opts = {
         method,
         headers: { 'Content-Type': 'application/json' },
       };
+      // Attach JWT Bearer token if available
+      const token = Session.token;
+      if (token) opts.headers['Authorization'] = `Bearer ${token}`;
       if (body) opts.body = JSON.stringify(body);
       const res = await fetch(API_BASE + path, opts);
       if (!res.ok) {
@@ -36,7 +39,6 @@ const API = {
       }
       return res.json();
     } catch (err) {
-      // If backend is down, throw cleanly
       if (err.message.includes('fetch') || err.message.includes('Failed')) {
         throw new Error('Cannot reach server. Is the backend running?');
       }
@@ -44,29 +46,47 @@ const API = {
     }
   },
 
+  /* ── Evidence upload (multipart FormData) ── */
+  async uploadEvidence(files) {
+    const fd = new FormData();
+    files.forEach(f => fd.append('files', f));
+    const token = Session.token;
+    const res = await fetch(API_BASE + '/evidence/upload', {
+      method: 'POST',
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+      body: fd,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ message: 'Upload failed' }));
+      throw new Error(err.message || 'Upload failed');
+    }
+    return res.json();
+  },
+
   /* ── Auth ── */
-  login   : (username, password) => API._req('POST', '/auth/login',    { username, password }),
-  register: (data)               => API._req('POST', '/auth/register',  data),
+  login: (username, password) => API._req('POST', '/auth/login', { username, password }),
+  register: (data) => API._req('POST', '/auth/register', data),
 
   /* ── Cases ── */
-  getAllCases  : ()         => API._req('GET',  '/cases'),
-  getMyCases  : (userId)   => API._req('GET',  `/cases/user/${userId}`),
-  submitCase  : (data)     => API._req('POST', '/cases',              data),
-  updateCase  : (id, data) => API._req('PUT',  `/cases/${id}`,        data),
+  getAllCases: () => API._req('GET', '/cases'),
+  getMyCases: (userId) => API._req('GET', `/cases/user/${userId}`),
+  submitCase: (data) => API._req('POST', '/cases', data),
+  updateCase: (id, data) => API._req('PUT', `/cases/${id}`, data),
 
   /* ── Users ── */
-  getAllUsers  : ()         => API._req('GET',  '/users'),
-  getInvestigators: ()     => API._req('GET',  '/users/investigators'),
+  getAllUsers: () => API._req('GET', '/users'),
+  getInvestigators: () => API._req('GET', '/users/investigators'),
 };
 
 /* ══════════════════════════════════════════════════════════════
    SESSION STORE (in-memory, cleared on refresh to force re-login)
    ══════════════════════════════════════════════════════════════ */
 const Session = {
-  _user: JSON.parse(sessionStorage.getItem('cs_current') || 'null'),
-  get currentUser()           { return this._user; },
-  set currentUser(v)          { this._user = v; sessionStorage.setItem('cs_current', JSON.stringify(v)); },
-  clear()                     { this._user = null; sessionStorage.removeItem('cs_current'); },
+  _data: JSON.parse(sessionStorage.getItem('cs_session') || 'null'),
+  get currentUser() { return this._data ? this._data.user : null; },
+  get token() { return this._data ? this._data.token : null; },
+  set(user, token) { this._data = { user, token }; sessionStorage.setItem('cs_session', JSON.stringify({ user, token })); },
+  clear() { this._data = null; sessionStorage.removeItem('cs_session'); },
 };
 
 /* ══════════════════════════════════════════════════════════════
@@ -77,16 +97,17 @@ const Session = {
 async function doLogin() {
   const username = document.getElementById('loginUser').value.trim();
   const password = document.getElementById('loginPass').value;
-  const err      = document.getElementById('loginError');
+  const err = document.getElementById('loginError');
   err.textContent = '';
 
   if (!username || !password) { err.textContent = 'Please fill in all fields.'; return; }
 
   setLoading('loginBtn', true);
   try {
-    const user = await API.login(username, password);
-    Session.currentUser = user;
-    openApp(user);
+    const resp = await API.login(username, password);
+    // Server returns { token, user }
+    Session.set(resp.user, resp.token);
+    openApp(resp.user);
   } catch (e) {
     err.textContent = e.message;
   } finally {
@@ -96,23 +117,23 @@ async function doLogin() {
 
 /** Register form submission */
 async function doRegister() {
-  const name     = document.getElementById('regName').value.trim();
+  const name = document.getElementById('regName').value.trim();
   const username = document.getElementById('regUsername').value.trim().toLowerCase();
-  const email    = document.getElementById('regEmail').value.trim().toLowerCase();
-  const phone    = document.getElementById('regPhone').value.trim();
-  const city     = document.getElementById('regCity').value.trim();
-  const address  = document.getElementById('regAddress').value.trim();
+  const email = document.getElementById('regEmail').value.trim().toLowerCase();
+  const phone = document.getElementById('regPhone').value.trim();
+  const city = document.getElementById('regCity').value.trim();
+  const address = document.getElementById('regAddress').value.trim();
   const password = document.getElementById('regPass').value;
-  const pass2    = document.getElementById('regPass2').value;
-  const err      = document.getElementById('regError');
-  const succ     = document.getElementById('regSuccess');
+  const pass2 = document.getElementById('regPass2').value;
+  const err = document.getElementById('regError');
+  const succ = document.getElementById('regSuccess');
   err.textContent = ''; succ.textContent = '';
 
   if (!name || !username || !email || !phone || !address || !password) {
     err.textContent = 'All fields are required.'; return;
   }
   if (password.length < 6) { err.textContent = 'Password must be at least 6 characters.'; return; }
-  if (password !== pass2)  { err.textContent = 'Passwords do not match.'; return; }
+  if (password !== pass2) { err.textContent = 'Passwords do not match.'; return; }
 
   setLoading('registerBtn', true);
   try {
@@ -140,7 +161,7 @@ function switchTab(tab) {
   document.querySelectorAll('.tab').forEach((t, i) =>
     t.classList.toggle('active', (tab === 'login' && i === 0) || (tab === 'register' && i === 1))
   );
-  document.getElementById('loginForm').style.display    = tab === 'login'    ? 'block' : 'none';
+  document.getElementById('loginForm').style.display = tab === 'login' ? 'block' : 'none';
   document.getElementById('registerForm').style.display = tab === 'register' ? 'block' : 'none';
 }
 
@@ -153,15 +174,15 @@ function openApp(user) {
   document.getElementById('loginScreen').classList.remove('active');
   document.getElementById('appScreen').classList.add('active');
 
-  document.getElementById('avatarText').textContent  = user.name[0].toUpperCase();
-  document.getElementById('sidebarName').textContent  = user.name;
+  document.getElementById('avatarText').textContent = user.name[0].toUpperCase();
+  document.getElementById('sidebarName').textContent = user.name;
   document.getElementById('sidebarEmail').textContent = user.email;
 
   const badge = document.getElementById('roleBadge');
   badge.className = 'role-badge';
-  if (user.role === 'admin')        { badge.classList.add('role-admin');        badge.textContent = 'Administrator'; }
+  if (user.role === 'admin') { badge.classList.add('role-admin'); badge.textContent = 'Administrator'; }
   else if (user.role === 'investigator') { badge.classList.add('role-investigator'); badge.textContent = 'Investigator'; }
-  else                              { badge.classList.add('role-user');         badge.textContent = 'Citizen'; }
+  else { badge.classList.add('role-user'); badge.textContent = 'Citizen'; }
 
   buildNav(user.role);
 }
@@ -172,21 +193,21 @@ function buildNav(role) {
   let items = [];
   if (role === 'user')
     items = [
-      { id: 'dashboard',   icon: '📊', label: 'Dashboard' },
-      { id: 'myCases',     icon: '📁', label: 'My Cases' },
-      { id: 'submitCase',  icon: '✏️',  label: 'Report Crime' },
+      { id: 'dashboard', icon: '📊', label: 'Dashboard' },
+      { id: 'myCases', icon: '📁', label: 'My Cases' },
+      { id: 'submitCase', icon: '✏️', label: 'Report Crime' },
     ];
   else if (role === 'admin')
     items = [
-      { id: 'dashboard',    icon: '📊', label: 'Dashboard' },
-      { id: 'allCases',     icon: '📁', label: 'All Cases' },
-      { id: 'users',        icon: '👥', label: 'Citizens' },
-      { id: 'investigators',icon: '🔍',  label: 'Investigators' },
+      { id: 'dashboard', icon: '📊', label: 'Dashboard' },
+      { id: 'allCases', icon: '📁', label: 'All Cases' },
+      { id: 'users', icon: '👥', label: 'Citizens' },
+      { id: 'investigators', icon: '🔍', label: 'Investigators' },
     ];
   else
     items = [
       { id: 'dashboard', icon: '📊', label: 'Dashboard' },
-      { id: 'myCases',   icon: '📁', label: 'My Cases' },
+      { id: 'myCases', icon: '📁', label: 'My Cases' },
     ];
 
   nav.innerHTML = items
@@ -205,19 +226,19 @@ async function showPage(id) {
   if (navEl) navEl.classList.add('active');
 
   const user = Session.currentUser;
-  const mc   = document.getElementById('mainContent');
+  const mc = document.getElementById('mainContent');
 
   mc.innerHTML = loadingHTML();   // show spinner while fetching
 
   try {
     switch (id) {
-      case 'dashboard':    mc.innerHTML = await renderDashboard(user);    break;
-      case 'myCases':      mc.innerHTML = await renderMyCases(user);      break;
-      case 'submitCase':   mc.innerHTML = renderSubmitCase();              break;
-      case 'allCases':     mc.innerHTML = await renderAllCases();          break;
-      case 'users':        mc.innerHTML = await renderUsers();             break;
-      case 'investigators':mc.innerHTML = await renderInvestigators();     break;
-      default:             mc.innerHTML = '';
+      case 'dashboard': mc.innerHTML = await renderDashboard(user); break;
+      case 'myCases': mc.innerHTML = await renderMyCases(user); break;
+      case 'submitCase': mc.innerHTML = renderSubmitCase(); break;
+      case 'allCases': mc.innerHTML = await renderAllCases(); break;
+      case 'users': mc.innerHTML = await renderUsers(); break;
+      case 'investigators': mc.innerHTML = await renderInvestigators(); break;
+      default: mc.innerHTML = '';
     }
   } catch (e) {
     mc.innerHTML = errorHTML(e.message);
@@ -232,11 +253,11 @@ async function showPage(id) {
 async function renderDashboard(user) {
   /* USER dashboard */
   if (user.role === 'user') {
-    const mine  = await API.getMyCases(user._id || user.id);
+    const mine = await API.getMyCases(user._id || user.id);
     const stats = {
-      total:    mine.length,
-      submitted:mine.filter(c => c.status === 'Submitted').length,
-      active:   mine.filter(c => ['Under Review','Investigation'].includes(c.status)).length,
+      total: mine.length,
+      submitted: mine.filter(c => c.status === 'Submitted').length,
+      active: mine.filter(c => ['Under Review', 'Investigation'].includes(c.status)).length,
       resolved: mine.filter(c => c.status === 'Resolved').length,
     };
     return `<div class="page active">
@@ -255,11 +276,11 @@ async function renderDashboard(user) {
              <div class="card-header"><div class="card-title">Recent Cases</div></div>
              <div class="table-wrap"><table>
                <thead><tr><th>Case No.</th><th>Type</th><th>Date</th><th>Status</th><th>Action</th></tr></thead>
-               <tbody>${mine.slice(0,5).map(c => `
+               <tbody>${mine.slice(0, 5).map(c => `
                  <tr>
                    <td><strong>#${c.caseNum}</strong></td>
                    <td>${typeBadge(c.type)}</td>
-                   <td>${c.submittedAt ? c.submittedAt.slice(0,10) : ''}</td>
+                   <td>${c.submittedAt ? c.submittedAt.slice(0, 10) : ''}</td>
                    <td>${statusBadge(c.status)}</td>
                    <td><div class="actions"><button class="btn btn-secondary" onclick='openCaseModal("${c._id || c.id}","user")'>View</button></div></td>
                  </tr>`).join('')}
@@ -275,13 +296,13 @@ async function renderDashboard(user) {
   if (user.role === 'admin') {
     const [cases, allUsers] = await Promise.all([API.getAllCases(), API.getAllUsers()]);
     const stats = {
-      total:    cases.length,
-      submitted:cases.filter(c => c.status === 'Submitted').length,
-      active:   cases.filter(c => ['Under Review','Investigation'].includes(c.status)).length,
+      total: cases.length,
+      submitted: cases.filter(c => c.status === 'Submitted').length,
+      active: cases.filter(c => ['Under Review', 'Investigation'].includes(c.status)).length,
       resolved: cases.filter(c => c.status === 'Resolved').length,
     };
     const citizens = allUsers.filter(u => u.role === 'user').length;
-    const invs     = allUsers.filter(u => u.role === 'investigator').length;
+    const invs = allUsers.filter(u => u.role === 'investigator').length;
     return `<div class="page active">
       <div class="page-header"><div class="page-title">Admin Dashboard 🛡️</div><div class="page-sub">System overview and management</div></div>
       <div class="stats-grid">
@@ -313,12 +334,12 @@ async function renderDashboard(user) {
 
   /* INVESTIGATOR dashboard */
   if (user.role === 'investigator') {
-    const mine  = await API.getMyCases(user._id || user.id);
+    const mine = await API.getMyCases(user._id || user.id);
     const stats = {
-      total:   mine.length,
-      active:  mine.filter(c => c.status === 'Investigation').length,
-      review:  mine.filter(c => c.status === 'Under Review').length,
-      resolved:mine.filter(c => c.status === 'Resolved').length,
+      total: mine.length,
+      active: mine.filter(c => c.status === 'Investigation').length,
+      review: mine.filter(c => c.status === 'Under Review').length,
+      resolved: mine.filter(c => c.status === 'Resolved').length,
     };
     return `<div class="page active">
       <div class="page-header"><div class="page-title">Investigator Dashboard 🔍</div><div class="page-sub">Your assigned cases overview</div></div>
@@ -337,7 +358,7 @@ async function renderDashboard(user) {
                  <td>${c.userName}</td>
                  <td>${typeBadge(c.type)}</td>
                  <td>${statusBadge(c.status)}</td>
-                 <td>${c.submittedAt ? c.submittedAt.slice(0,10) : ''}</td>
+                 <td>${c.submittedAt ? c.submittedAt.slice(0, 10) : ''}</td>
                  <td><button class="btn btn-secondary" onclick='openCaseModal("${c._id || c.id}","investigator")'>Update</button></td>
                </tr>`).join('')}
              </tbody>
@@ -350,7 +371,7 @@ async function renderDashboard(user) {
 
 /* ── My Cases ── */
 async function renderMyCases(user) {
-  const cases    = user.role === 'investigator'
+  const cases = user.role === 'investigator'
     ? await API.getMyCases(user._id || user.id)
     : await API.getMyCases(user._id || user.id);
   const viewMode = user.role === 'investigator' ? 'investigator' : 'user';
@@ -367,7 +388,7 @@ async function renderMyCases(user) {
                <td><strong>#${c.caseNum}</strong></td>
                <td>${typeBadge(c.type)}</td>
                <td>${c.location}</td>
-               <td>${c.submittedAt ? c.submittedAt.slice(0,10) : ''}</td>
+               <td>${c.submittedAt ? c.submittedAt.slice(0, 10) : ''}</td>
                <td>${statusBadge(c.status)}</td>
                <td>${c.assignedName || '<span style="color:var(--muted)">Pending</span>'}</td>
                <td><button class="btn btn-secondary" onclick='openCaseModal("${c._id || c.id}","${viewMode}")'>View</button></td>
@@ -407,7 +428,7 @@ function renderCasesRows(cases) {
       <td>${c.userName}</td>
       <td>${typeBadge(c.type)}</td>
       <td>${c.location}</td>
-      <td>${c.submittedAt ? c.submittedAt.slice(0,10) : ''}</td>
+      <td>${c.submittedAt ? c.submittedAt.slice(0, 10) : ''}</td>
       <td>${statusBadge(c.status)}</td>
       <td>${c.assignedName || '<span style="color:var(--muted)">Unassigned</span>'}</td>
       <td><button class="btn btn-secondary" onclick='openCaseModal("${c._id || c.id}","admin")'>Manage</button></td>
@@ -439,14 +460,14 @@ async function renderUsers() {
     <div class="card"><div class="table-wrap"><table>
       <thead><tr><th>Name</th><th>Username</th><th>Email</th><th>Phone</th><th>City</th><th>Joined</th><th>Cases</th></tr></thead>
       <tbody>${citizens.map(u => {
-        const cnt = cases.filter(c => c.userId === (u._id || u.id)).length;
-        return `<tr>
+    const cnt = cases.filter(c => c.userId === (u._id || u.id)).length;
+    return `<tr>
           <td>${u.name}</td><td>${u.username}</td><td>${u.email}</td>
           <td>${u.phone}</td><td>${u.city || '-'}</td>
-          <td>${u.createdAt ? u.createdAt.slice(0,10) : ''}</td>
+          <td>${u.createdAt ? u.createdAt.slice(0, 10) : ''}</td>
           <td><span class="badge badge-submitted">${cnt} case${cnt !== 1 ? 's' : ''}</span></td>
         </tr>`;
-      }).join('')}</tbody>
+  }).join('')}</tbody>
     </table></div></div>
   </div>`;
 }
@@ -460,13 +481,13 @@ async function renderInvestigators() {
     <div class="card"><div class="table-wrap"><table>
       <thead><tr><th>Name</th><th>Username</th><th>Department</th><th>Email</th><th>Phone</th><th>Active Cases</th></tr></thead>
       <tbody>${invs.map(u => {
-        const cnt = cases.filter(c => c.assignedTo === (u._id || u.id) && c.status !== 'Resolved').length;
-        return `<tr>
+    const cnt = cases.filter(c => c.assignedTo === (u._id || u.id) && c.status !== 'Resolved').length;
+    return `<tr>
           <td>${u.name}</td><td>${u.username}</td><td>${u.department || '-'}</td>
           <td>${u.email}</td><td>${u.phone}</td>
           <td><span class="badge badge-investigation">${cnt} active</span></td>
         </tr>`;
-      }).join('')}</tbody>
+  }).join('')}</tbody>
     </table></div></div>
   </div>`;
 }
@@ -547,7 +568,8 @@ function renderSubmitCase() {
 }
 
 function handleFiles(files) {
-  for (let f of files) { if (pendingFiles.length < 10) pendingFiles.push(f.name); }
+  // Store actual File objects (not just names) for real upload
+  for (let f of files) { if (pendingFiles.length < 10) pendingFiles.push(f); }
   renderFileList();
 }
 function removeFile(i) {
@@ -557,39 +579,45 @@ function removeFile(i) {
 }
 function renderFileList() {
   document.getElementById('fileList').innerHTML =
-    pendingFiles.map((n, i) => `<div class="file-item"><span>📄 ${n}</span><span style="color:var(--muted);cursor:pointer" onclick="removeFile(${i})">✕</span></div>`).join('');
+    pendingFiles.map((f, i) => `<div class="file-item"><span>📄 ${f.name} <span style="color:var(--muted);font-size:0.75rem">(${(f.size / 1024).toFixed(1)} KB)</span></span><span style="color:var(--muted);cursor:pointer" onclick="removeFile(${i})">✕</span></div>`).join('');
 }
 
 async function submitCase() {
-  const err    = document.getElementById('submitCaseError');
-  const type   = document.getElementById('cType').value;
-  const loc    = document.getElementById('cLocation').value.trim();
-  const date   = document.getElementById('cDate').value;
-  const desc   = document.getElementById('cDesc').value.trim();
+  const err = document.getElementById('submitCaseError');
+  const type = document.getElementById('cType').value;
+  const loc = document.getElementById('cLocation').value.trim();
+  const date = document.getElementById('cDate').value;
+  const desc = document.getElementById('cDesc').value.trim();
   if (!type || !loc || !date || !desc) {
     err.textContent = 'Please fill in all required fields (type, location, date, description).';
     return;
   }
   err.textContent = '';
 
-  const user    = Session.currentUser;
-  const payload = {
-    userId: user._id || user.id, userName: user.name,
-    userEmail: user.email, userPhone: user.phone,
-    type, location: loc, incidentDate: date,
-    incidentTime: document.getElementById('cTime').value,
-    description: desc,
-    amount:         document.getElementById('cAmount').value,
-    transactionId:  document.getElementById('cTxn').value.trim(),
-    bankName:       document.getElementById('cBank').value.trim(),
-    ipAddress:      document.getElementById('cIp').value.trim(),
-    websiteUrl:     document.getElementById('cUrl').value.trim(),
-    deviceInfo:     document.getElementById('cDevice').value.trim(),
-    evidenceFiles:  [...pendingFiles],
-  };
-
   setLoading('submitCaseBtn', true);
   try {
+    // Step 1: Upload evidence files to get SHA-256 hashes
+    let evidenceFiles = [];
+    if (pendingFiles.length > 0) {
+      showNotif('⏳', 'Uploading evidence files...', 'success');
+      const uploaded = await API.uploadEvidence(pendingFiles);
+      evidenceFiles = uploaded;
+    }
+
+    // Step 2: Submit case with evidence metadata (server fills userId from JWT)
+    const payload = {
+      type, location: loc, incidentDate: date,
+      incidentTime: document.getElementById('cTime').value,
+      description: desc,
+      amount: document.getElementById('cAmount').value,
+      transactionId: document.getElementById('cTxn').value.trim(),
+      bankName: document.getElementById('cBank').value.trim(),
+      ipAddress: document.getElementById('cIp').value.trim(),
+      websiteUrl: document.getElementById('cUrl').value.trim(),
+      deviceInfo: document.getElementById('cDevice').value.trim(),
+      evidenceFiles,
+    };
+
     const newCase = await API.submitCase(payload);
     showNotif('✅', `Case #${newCase.caseNum} submitted successfully!`, 'success');
     showPage('myCases');
@@ -611,7 +639,7 @@ async function openCaseModal(caseId, viewMode) {
   const c = cases.find(x => (x._id || x.id) === caseId);
   if (!c) return;
 
-  const phases   = ['Submitted', 'Under Review', 'Investigation', 'Resolved'];
+  const phases = ['Submitted', 'Under Review', 'Investigation', 'Resolved'];
   const phaseIdx = phases.indexOf(c.status);
 
   /* Admin controls */
@@ -677,7 +705,7 @@ async function openCaseModal(caseId, viewMode) {
     <div class="modal-header">
       <div>
         <div class="modal-title">Case #${c.caseNum}</div>
-        <div style="color:var(--muted);font-size:0.85rem;margin-top:0.2rem">${c.type} · ${c.submittedAt ? c.submittedAt.slice(0,10) : ''}</div>
+        <div style="color:var(--muted);font-size:0.85rem;margin-top:0.2rem">${c.type} · ${c.submittedAt ? c.submittedAt.slice(0, 10) : ''}</div>
       </div>
       <button class="btn-close" onclick="closeModal()">✕</button>
     </div>
@@ -701,7 +729,7 @@ async function openCaseModal(caseId, viewMode) {
       <div class="detail-item"><label>Citizen</label><p>${c.userName}</p></div>
       <div class="detail-item"><label>Contact</label><p>${c.userPhone || '-'}</p></div>
       <div class="detail-item"><label>Location</label><p>${c.location}</p></div>
-      <div class="detail-item"><label>Incident Date</label><p>${c.incidentDate ? c.incidentDate.slice(0,10) : '-'}${c.incidentTime ? ' at ' + c.incidentTime : ''}</p></div>
+      <div class="detail-item"><label>Incident Date</label><p>${c.incidentDate ? c.incidentDate.slice(0, 10) : '-'}${c.incidentTime ? ' at ' + c.incidentTime : ''}</p></div>
       ${c.amount ? `<div class="detail-item"><label>Amount Lost</label><p style="color:var(--accent3);font-weight:700">₹${parseInt(c.amount).toLocaleString()}</p></div>` : ''}
       ${c.bankName ? `<div class="detail-item"><label>Bank / App</label><p>${c.bankName}</p></div>` : ''}
       ${c.transactionId ? `<div class="detail-item"><label>Transaction ID</label><p>${c.transactionId}</p></div>` : ''}
@@ -712,8 +740,15 @@ async function openCaseModal(caseId, viewMode) {
       <div class="detail-item detail-full"><label>Description</label><p style="line-height:1.6;color:var(--muted)">${c.description}</p></div>
       ${c.evidenceFiles && c.evidenceFiles.length ? `
         <div class="detail-item detail-full">
-          <label>Evidence Files (${c.evidenceFiles.length})</label>
-          <p>${c.evidenceFiles.map(f => `<span style="display:inline-block;padding:3px 8px;background:var(--surface2);border-radius:6px;font-size:0.78rem;margin:2px">📎 ${f}</span>`).join('')}</p>
+          <label>Evidence Files (${c.evidenceFiles.length}) — SHA-256 Verified</label>
+          <p>${c.evidenceFiles.map(f => {
+    const name = typeof f === 'object' ? f.originalName : f;
+    const hash = typeof f === 'object' && f.sha256 ? f.sha256 : null;
+    const url = typeof f === 'object' && f.storedName ? '/uploads/' + f.storedName : null;
+    const link = url ? `<a href="${url}" target="_blank" style="color:var(--accent);text-decoration:none">📎 ${name}</a>` : `📎 ${name}`;
+    const hashTag = hash ? `<span style="font-family:monospace;font-size:0.68rem;color:var(--muted);display:block;margin-top:1px">SHA-256: ${hash.slice(0, 16)}…</span>` : '';
+    return `<span style="display:inline-block;padding:4px 10px;background:var(--surface2);border-radius:6px;font-size:0.78rem;margin:2px;vertical-align:top">${link}${hashTag}</span>`;
+  }).join('')}</p>
         </div>` : ''}
     </div>
 
@@ -724,7 +759,7 @@ async function openCaseModal(caseId, viewMode) {
         ${(c.statusHistory || []).map((h, i, arr) => `
           <div class="timeline-item ${i === arr.length - 1 ? 'active-step' : 'done'}">
             <div class="timeline-stage">${h.status}</div>
-            <div class="timeline-date">${h.date ? h.date.slice(0,10) : ''}</div>
+            <div class="timeline-date">${h.date ? h.date.slice(0, 10) : ''}</div>
             ${h.note ? `<div style="color:var(--muted);font-size:0.82rem;margin-top:0.2rem">${h.note}</div>` : ''}
           </div>`).join('')}
       </div>
@@ -735,9 +770,9 @@ async function openCaseModal(caseId, viewMode) {
 }
 
 async function saveAdminUpdate(caseId) {
-  const invId  = document.getElementById('invSelect').value;
+  const invId = document.getElementById('invSelect').value;
   const status = document.getElementById('statusSelect').value;
-  const note   = document.getElementById('adminNote').value.trim();
+  const note = document.getElementById('adminNote').value.trim();
 
   try {
     await API.updateCase(caseId, { invId, status, note, updatedBy: 'admin' });
@@ -751,7 +786,7 @@ async function saveAdminUpdate(caseId) {
 
 async function saveInvUpdate(caseId) {
   const status = document.getElementById('invStatusSelect').value;
-  const note   = document.getElementById('invNote').value.trim();
+  const note = document.getElementById('invNote').value.trim();
   if (!note) { showNotif('⚠️', 'Please add a note before updating.', 'error'); return; }
 
   try {
@@ -772,12 +807,12 @@ function closeModal() {
    7. HELPERS
    ══════════════════════════════════════════════════════════════ */
 function statusBadge(s) {
-  const map = { 'Submitted':'submitted','Under Review':'review','Investigation':'investigation','Resolved':'resolved' };
+  const map = { 'Submitted': 'submitted', 'Under Review': 'review', 'Investigation': 'investigation', 'Resolved': 'resolved' };
   return `<span class="badge badge-${map[s] || 'submitted'}">${s}</span>`;
 }
 
 function typeBadge(t) {
-  const map = { 'Financial Fraud':'fraud','Phishing':'phishing','Cyberbullying':'cyberbullying','Identity Theft':'identity','Hacking':'hacking' };
+  const map = { 'Financial Fraud': 'fraud', 'Phishing': 'phishing', 'Cyberbullying': 'cyberbullying', 'Identity Theft': 'identity', 'Hacking': 'hacking' };
   const key = Object.keys(map).find(k => t && t.includes(k.split(' ')[0])) || 'other';
   return `<span class="badge badge-${map[key] || 'other'}">${t}</span>`;
 }
@@ -785,7 +820,7 @@ function typeBadge(t) {
 function showNotif(icon, msg, type) {
   const el = document.getElementById('notif');
   document.getElementById('notifIcon').textContent = icon;
-  document.getElementById('notifMsg').textContent  = msg;
+  document.getElementById('notifMsg').textContent = msg;
   el.className = `notif notif-${type}`;
   setTimeout(() => el.classList.add('hidden'), 3500);
 }
@@ -801,7 +836,7 @@ function errorHTML(msg) {
 function setLoading(btnId, loading) {
   const btn = document.getElementById(btnId);
   if (!btn) return;
-  btn.disabled   = loading;
+  btn.disabled = loading;
   btn.textContent = loading ? 'Please wait...' : btn.dataset.label || btn.textContent;
   if (!btn.dataset.label && !loading) return;
   if (loading) btn.dataset.label = btn.textContent;
@@ -810,7 +845,7 @@ function setLoading(btnId, loading) {
 /* ══════════════════════════════════════════════════════════════
    8. BOOT
    ══════════════════════════════════════════════════════════════ */
-document.getElementById('modalOverlay').addEventListener('click', function(e) {
+document.getElementById('modalOverlay').addEventListener('click', function (e) {
   if (e.target === this) closeModal();
 });
 
