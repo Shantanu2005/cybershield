@@ -18,7 +18,7 @@
    Wraps all fetch() calls to the Express backend.
    Falls back to localStorage if the server is unreachable.
    ══════════════════════════════════════════════════════════════ */
-const API_BASE = 'http://localhost:3000/api';
+const API_BASE = 'https://cybershield-b7th.onrender.com/';
 
 const API = {
   /* ── internal fetch helper (attaches JWT) ── */
